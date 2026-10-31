@@ -9,11 +9,19 @@
 <body>
 <div id="wrap">
   <canvas id="c" width="960" height="540"></canvas>
-  <div id="menu">
+  
+  <!-- Pantalla de inicio para forzar la interacción del usuario y habilitar el audio -->
+  <div id="splash">
+    <h1>Long Trip</h1>
+    <p>Click Anywhere to Start</p>
+  </div>
+
+  <!-- Menú principal oculto inicialmente hasta que se interactúa -->
+  <div id="menu" class="hide">
     <h1>Long Trip</h1>
     <p id="score"></p>
     <button id="play">Play</button>
-    <label>Volumen <input id="vol" type="range" min="0" max="1" step="0.05" value="0.7"></label>
+    <label>Volume<input id="vol" type="range" min="0" max="1" step="0.05" value="0.7"></label>
   </div>
 </div>
 <script src="js/game.js"></script>

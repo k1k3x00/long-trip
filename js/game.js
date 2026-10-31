@@ -1,8 +1,8 @@
 (() => {
 const cv = document.getElementById('c'), g = cv.getContext('2d');
 const W = 960, H = 540, HY = 190, D = 6, RW = W * .55, CX = W / 2;
-const menu = document.getElementById('menu'), volEl = document.getElementById('vol'),
-      scoreEl = document.getElementById('score'), playBtn = document.getElementById('play');
+const menu = document.getElementById('menu'), splashEl = document.getElementById('splash'),
+      volEl = document.getElementById('vol'), scoreEl = document.getElementById('score'), playBtn = document.getElementById('play');
 const nc = document.createElement('canvas'); nc.width = W; nc.height = H; const ng = nc.getContext('2d');
 const mix = (a, b, k) => `rgb(${a.map((x, i) => Math.round(x + (b[i] - x) * k))})`;
 
@@ -11,7 +11,7 @@ const mk = (f, loop = false) => { const a = new Audio('audio/' + f); a.loop = lo
 const S = {
   engine: mk('sfx/engine.mp3', true), horn: mk('sfx/horn.mp3'), crash: mk('sfx/crash.mp3'),
   wiper: mk('sfx/wiper.mp3', true), stat: mk('sfx/radio-static.mp3'), rain: mk('sfx/rain.mp3', true),
-  welcome: mk('voice/welcome.mp3'), intro: mk('voice/intro.mp3'),
+  welcome: mk('voice/welcome.mp4'), intro: mk('voice/intro.mp4'),
   refuel: mk('sfx/refuel.mp3')
 };
 const BASE = { engine: .5, horn: .9, crash: 1, wiper: .6, stat: .5, rain: .5, welcome: 1, intro: 1, refuel: .8 };
@@ -182,16 +182,13 @@ function cabin() {
   g.beginPath(); g.moveTo(0, 0); g.lineTo(90, 0); g.lineTo(0, H * .7); g.fill();
   g.beginPath(); g.moveTo(W, 0); g.lineTo(W - 90, 0); g.lineTo(W, H * .7); g.fill();
   g.fillRect(0, 0, W, 20);
-  g.fillStyle = '#0b0c10'; g.fillRect(W / 2 - 70, 20, 140, 26); // espejo retrovisor
-  // tablero
+  g.fillStyle = '#0b0c10'; g.fillRect(W / 2 - 70, 20, 140, 26);
   const gr = g.createLinearGradient(0, H - 190, 0, H); gr.addColorStop(0, '#2a2d35'); gr.addColorStop(1, '#0c0d10');
   g.fillStyle = gr; g.beginPath(); g.moveTo(0, H); g.lineTo(0, H - 85); g.quadraticCurveTo(W / 2, H - 185, W, H - 85); g.lineTo(W, H); g.fill();
   g.strokeStyle = '#3d424d'; g.lineWidth = 2; g.beginPath(); g.moveTo(0, H - 85); g.quadraticCurveTo(W / 2, H - 185, W, H - 85); g.stroke();
-  // limpiaparabrisas
   const w = (1 - Math.cos(wipeA)) / 2, ang = Math.PI * .97 - w * Math.PI * .94, px0 = W / 2 + 90, py0 = H - 78;
   g.strokeStyle = '#050505'; g.lineWidth = 6; g.beginPath(); g.moveTo(px0, py0);
   g.lineTo(px0 + 300 * Math.cos(ang), py0 - 300 * Math.sin(ang)); g.stroke();
-  // medidores
   gauge(W / 2 - 170, H - 66, 50, v * 3.6 / 240, 8);
   gauge(W / 2 + 170, H - 66, 40, fuel, 4);
   g.textAlign = 'center'; g.fillStyle = '#7fe3ff'; g.font = 'bold 20px "Courier New",monospace';
@@ -200,11 +197,9 @@ function cabin() {
   g.fillStyle = '#cfe9f5'; g.fillText('E', W / 2 + 170 - 26, H - 46); g.fillText('F', W / 2 + 170 + 26, H - 46); g.fillText('FUEL', W / 2 + 170, H - 36);
   const low = fuel < .25, blink = low && Math.floor(t * 3) % 2 === 0;
   chip('LIGHTS', W / 2 - 62, H - 100, lightsOn, '#5dff7a'); chip('WIPER', W / 2, H - 100, wiperOn, '#5dd0ff'); chip('FUEL', W / 2 + 62, H - 100, blink, '#ff4b3a');
-  // volante
   g.save(); g.translate(W / 2, H + 30); g.rotate(steer);
   g.strokeStyle = '#08090b'; g.lineWidth = 16; g.beginPath(); g.arc(0, 0, 92, 0, 7); g.stroke();
   g.lineWidth = 10; g.beginPath(); g.moveTo(-92, 0); g.lineTo(92, 0); g.moveTo(0, 0); g.lineTo(0, -92); g.stroke(); g.restore();
-  // radio
   g.fillStyle = '#05080a'; g.fillRect(W - 230, H - 52, 190, 34);
   g.textAlign = 'left'; g.fillStyle = radioOn ? '#ffb627' : '#4a3a14'; g.font = 'bold 18px "Courier New",monospace';
   g.fillText(radioOn ? '♪ ' + stations[st].n : 'RADIO OFF', W - 218, H - 29);
@@ -290,17 +285,29 @@ addEventListener('keydown', e => {
 addEventListener('keyup', e => { keys[e.code] = false; });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
 
-/* Bienvenida: suena al cargar la página (o en la primera interacción si el navegador bloquea el sonido automático) */
-function playWelcome(e) {
-  if (introDone || on || (e && e.target === playBtn)) return;
-  S.welcome.play().then(() => { introDone = true; }).catch(() => {});
-}
-S.welcome.addEventListener('error', () => { introDone = true; });
-playWelcome();
-addEventListener('pointerdown', playWelcome); addEventListener('keydown', playWelcome);
+/* ---------- GESTIÓN DE BIENVENIDA Y AUDIO ---------- */
+function handleFirstInteraction(e) {
+  if (e && e.target.tagName === 'BUTTON') return;
 
-/* Introducción de la partida: mientras suena (unos 30 s) no aparece ningún auto ni obstáculo y no suena nada más.
-   Cuando termina (o con Enter) empieza la partida de verdad desde 0 m. */
+  // 1. Ocultamos el splash y mostramos el menú principal primero
+  splashEl.classList.add('hide');
+  menu.classList.remove('hide');
+
+  // 2. Reproducimos el audio de bienvenida inmediatamente después de quitar el wrapper
+  S.welcome.play().then(() => {
+    introDone = true;
+  }).catch((err) => {
+    console.log("Audio de bienvenida bloqueado o falló:", err);
+  });
+
+  // 3. Limpiamos los eventos globales
+  removeEventListener('pointerdown', handleFirstInteraction);
+  removeEventListener('keydown', handleFirstInteraction);
+}
+
+addEventListener('pointerdown', handleFirstInteraction);
+addEventListener('keydown', handleFirstInteraction);
+
 function startRun() {
   if (!briefing) return;
   briefing = false; S.intro.pause();
@@ -309,7 +316,7 @@ function startRun() {
 }
 S.intro.onended = startRun;
 playBtn.onclick = () => {
-  S.welcome.pause(); introDone = true;
+  introDone = true;
   reset(); on = true; shown = true; scoreEl.textContent = '';
   menu.classList.add('hide'); playBtn.blur();
   briefing = true;
