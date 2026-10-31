@@ -107,17 +107,18 @@ function sky() {
   g.lineTo(W, HY); g.fill();
 }
 function road() {
-  for (let y = HY; y < H; y += 2) {
+  for (let y = HY; y < H; y += 3) {
     const s = (y - HY) / (H - HY); if (s < .004) continue;
     const p = D / s - D + dist, rw = RW * s, c = CX - px * rw, a = (p / 8 | 0) & 1;
-    g.fillStyle = a ? '#3f8f3a' : '#388632'; g.fillRect(0, y, W, 2);
-    g.fillStyle = (p / 3 | 0) & 1 ? '#d8d8d8' : '#c0392b'; g.fillRect(c - rw * 1.12, y, rw * 2.24, 2);
-    g.fillStyle = a ? '#4a4d54' : '#45484f'; g.fillRect(c - rw, y, rw * 2, 2);
-    g.fillStyle = '#e9e9e9'; g.fillRect(c - rw * .96, y, rw * .03, 2); g.fillRect(c + rw * .93, y, rw * .03, 2);
-    if ((p / 6 | 0) & 1) { g.fillStyle = '#f2c230'; g.fillRect(c - rw * .015, y, rw * .03, 2); }
+    g.fillStyle = a ? '#3f8f3a' : '#388632'; g.fillRect(0, y, W, 3);
+    g.fillStyle = (p / 3 | 0) & 1 ? '#d8d8d8' : '#c0392b'; g.fillRect(c - rw * 1.12, y, rw * 2.24, 3);
+    g.fillStyle = a ? '#4a4d54' : '#45484f'; g.fillRect(c - rw, y, rw * 2, 3);
+    g.fillStyle = '#e9e9e9'; g.fillRect(c - rw * .96, y, rw * .03, 3); g.fillRect(c + rw * .93, y, rw * .03, 3);
+    if ((p / 6 | 0) & 1) { g.fillStyle = '#f2c230'; g.fillRect(c - rw * .015, y, rw * .03, 3); }
   }
 }
 function drawObj(o) {
+  if (o.z < -2) return;
   const s = D / (o.z + D); if (s > 1.4) return;
   const y = HY + (H - HY) * s, rw = RW * s, x = CX + (o.x - px) * rw;
   if (o.k === 'tree') {
@@ -183,15 +184,15 @@ function weather() {
 }
 function draw() {
   sky(); road();
-  [...objs].sort((a, b) => b.z - a.z).forEach(drawObj);
+  objs.sort((a, b) => b.z - a.z).forEach(drawObj);
   weather(); cabin();
-  g.textAlign = 'center'; g.fillStyle = '#fff'; g.shadowColor = '#000'; g.shadowBlur = 6;
+  g.textAlign = 'center'; g.fillStyle = '#fff'; g.shadowColor = '#000'; g.shadowOffsetX = 2; g.shadowOffsetY = 2;
   g.font = 'bold 30px "Courier New",monospace'; g.fillText(Math.floor(dist) + ' m', W / 2, 58);
   if (on && t < 9) {
     g.font = '15px "Courier New",monospace';
     g.fillText('W/S acelerar-frenar · A/D mover · Q limpiaparabrisas · R radio · E/Z estación · Espacio bocina', W / 2, 88);
   }
-  g.shadowBlur = 0;
+  g.shadowOffsetX = 0; g.shadowOffsetY = 0;
   if (over) {
     g.fillStyle = `rgba(200,30,30,${Math.max(0, .6 - overT)})`; g.fillRect(0, 0, W, H);
     overT += 1 / 60;
@@ -224,8 +225,8 @@ playBtn.onclick = () => {
 
 function loop(ts) {
   const dt = Math.min(.05, (ts - last) / 1000 || 0); last = ts;
-  if (on) update(dt);
-  draw(); requestAnimationFrame(loop);
+  try { if (on) update(dt); draw(); } catch (e) { console.error(e); }
+  requestAnimationFrame(loop);
 }
 reset(); requestAnimationFrame(loop);
 })();
