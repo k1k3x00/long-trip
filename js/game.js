@@ -11,7 +11,7 @@ const mk = (f, loop = false) => { const a = new Audio('audio/' + f); a.loop = lo
 const S = {
   engine: mk('sfx/engine.mp3', true), horn: mk('sfx/horn.mp3'), crash: mk('sfx/crash.mp3'),
   wiper: mk('sfx/wiper.mp3', true), stat: mk('sfx/radio-static.mp3'), rain: mk('sfx/rain.mp3', true),
-  welcome: mk('voice/welcome.mp4'), intro: mk('voice/intro.mp4'),
+  welcome: mk('voice/welcome.mp4'), intro: mk('voice/intro.mp3'),
   refuel: mk('sfx/refuel.mp3')
 };
 const BASE = { engine: .5, horn: .9, crash: 1, wiper: .6, stat: .5, rain: .5, welcome: 1, intro: 1, refuel: .8 };
