@@ -1,8 +1,9 @@
 (() => {
 const cv = document.getElementById('c'), g = cv.getContext('2d');
 const W = 960, H = 540, HY = 190, D = 6, RW = W * .55, CX = W / 2;
-const menu = document.getElementById('menu'), splashEl = document.getElementById('splash'),
-      volEl = document.getElementById('vol'), scoreEl = document.getElementById('score'), playBtn = document.getElementById('play');
+const menu = document.getElementById('menu'), volEl = document.getElementById('vol'),
+      scoreEl = document.getElementById('score'), playBtn = document.getElementById('play'), splashEl = document.getElementById('splash'),
+      startBtn = document.getElementById('start') || (() => { const b = document.createElement('button'); b.id = 'start'; b.textContent = 'Start engine'; b.hidden = true; playBtn.after(b); return b; })();
 const nc = document.createElement('canvas'); nc.width = W; nc.height = H; const ng = nc.getContext('2d');
 const mix = (a, b, k) => `rgb(${a.map((x, i) => Math.round(x + (b[i] - x) * k))})`;
 
@@ -20,11 +21,33 @@ const stations = [
   { n: 'FM 95.5', a: mk('music/radio2.mp3', true) },
   { n: 'FM 101.3', a: mk('music/radio3.mp3', true) }
 ];
+/* Voces situacionales. intro.mp3 = estos clips pegados en este orden. Cada clip suena cuando ocurre su situación,
+   salvo que el jugador ya lo haya escuchado en el intro. Los clips nunca se pisan: se encolan. */
+const VO = [
+  { id: 'controls', f: 'voice/intro1.mp4' },    // al arrancar la partida
+  { id: 'rules',    f: 'voice/intro2.mp4' },    // primer auto u obstáculo a la vista
+  { id: 'fuel',     f: 'voice/intro2-5.mp4' },  // primer bidón a la vista, o tanque por debajo del 60%
+  { id: 'night',    f: 'voice/intro3.mp4' },    // empieza a oscurecer (incluye la lluvia si grabaste esa frase aquí)
+  { id: 'extras',   f: 'voice/intro4.mp4' },    // radio y bocina, a los 600 m
+  { id: 'bye',      f: 'voice/intro5.mp4' }     // despedida, justo después de extras
+];
+const clips = {};
+VO.forEach(c => { c.a = mk(c.f); c.dur = 0; c.a.addEventListener('loadedmetadata', () => { c.dur = c.a.duration || 0; }); clips[c.id] = c; });
+let voQ = [], voNow = null;
+function say(id) { const c = clips[id]; if (!c || c.heard || c.queued) return; c.queued = true; voQ.push(c); pump(); }
+function pump() {
+  if (voNow || !voQ.length || !on) return;
+  const c = voQ.shift(); voNow = c; c.heard = true;
+  const done = () => { c.a.onended = c.a.onerror = null; voNow = null; pump(); };
+  c.a.onended = c.a.onerror = done; c.a.currentTime = 0; c.a.play().catch(done);
+}
+function voStop() { voQ = []; if (voNow) { voNow.a.onended = voNow.a.onerror = null; voNow.a.pause(); voNow = null; } }
 const play = a => { a.currentTime = 0; a.play().catch(() => {}); };
 function setVol() {
   const v = +volEl.value;
   for (const k in S) S[k].volume = BASE[k] * v;
   stations.forEach(s => s.a.volume = .8 * v);
+  VO.forEach(c => c.a.volume = v);
 }
 volEl.oninput = setVol; setVol();
 
@@ -46,7 +69,8 @@ const COLORS = ['#d33a3a', '#2a6fdb', '#e8c020', '#2faa5a', '#e9e9e9', '#8a3fc7'
 const rc = () => COLORS[Math.random() * COLORS.length | 0];
 
 function reset() {
-  px = .5; v = 24; dist = 0; objs = []; spawnT = 1.5; treeT = 0; t = 0; dirt = 0; wipeA = 0; steer = 0;
+  voStop(); VO.forEach(c => { c.heard = false; c.queued = false; });
+  px = .5; v = 0; dist = 0; objs = []; spawnT = 1.5; treeT = 0; t = 0; dirt = 0; wipeA = 0; steer = 0;
   fuel = 1; fuelNext = 400; lightsOn = false; dayL = 1;
   wiperOn = false; rainOn = false; rainLv = 0; rainWas = false; over = false; overT = 0; radioOn = false;
   stations.forEach(s => s.a.pause()); S.wiper.pause(); S.rain.pause();
@@ -54,15 +78,42 @@ function reset() {
 }
 const tree = z => ({ k: 'tree', x: (Math.random() < .5 ? -1 : 1) * (1.7 + Math.random() * 2.5), z, vs: 0 });
 
-function spawn() {
+function makeCand() {
   const r = Math.random(), z = 240 + Math.random() * 30;
-  if (r < .36) objs.push({ k: 'car', x: -.5 + (Math.random() - .5) * .2, z, vs: -(18 + Math.random() * 14), hw: .24, c: rc(), d: 1 });
-  else if (r < .68) objs.push({ k: 'car', x: .5 + (Math.random() - .5) * .2, z, vs: 12 + Math.random() * 9, hw: .24, c: rc(), d: 0 });
-  else { const k = ['pot', 'log', 'rock'][Math.random() * 3 | 0];
-    objs.push({ k, x: Math.random() * 1.5 - .75, z, vs: 0, hw: { pot: .3, log: .42, rock: .22 }[k] }); }
+  if (r < .36) return { k: 'car', x: -.5 + (Math.random() - .5) * .2, z, vs: -(18 + Math.random() * 14), hw: .24, c: rc(), d: 1 };
+  if (r < .68) return { k: 'car', x: .5 + (Math.random() - .5) * .2, z, vs: 8 + Math.random() * 7, hw: .24, c: rc(), d: 0 };
+  const k = ['pot', 'log', 'rock'][Math.random() * 3 | 0];
+  return { k, x: Math.random() * 1.5 - .75, z, vs: 0, hw: { pot: .3, log: .42, rock: .22 }[k] };
+}
+/* ¿Existe al menos un camino por el que se pueda esquivar todo? Se simula el futuro (velocidad de crucero,
+   cambio lateral conservador de 1 unidad/s y márgenes de tiempo y espacio) y se propaga el conjunto de posiciones posibles. */
+function passable(list) {
+  const vp = Math.max(v, 22 + Math.min(dist / 250, 22)), hs = [];
+  for (const o of list) {
+    if (o.k === 'tree' || o.k === 'fuel') continue;
+    const c = vp - o.vs; if (c <= .5) continue;
+    const t2 = (o.z + 1.5) / c; if (t2 < 0) continue;
+    hs.push([Math.max(0, (o.z - 2.2) / c) - .15, t2 + .15, o.x - o.hw - .3, o.x + o.hw + .3]);
+  }
+  if (!hs.length) return true;
+  const DT = .1, DX = .05, N = 37, R = 2, steps = Math.min(400, Math.ceil(Math.max(...hs.map(h => h[1])) / DT) + 1);
+  let reach = new Uint8Array(N); reach[Math.round((Math.max(-.9, Math.min(.9, px)) + .9) / DX)] = 1;
+  for (let k = 1; k <= steps; k++) {
+    const tt = k * DT, nr = new Uint8Array(N);
+    for (let i = 0; i < N; i++) if (reach[i]) for (let j = Math.max(0, i - R); j <= Math.min(N - 1, i + R); j++) nr[j] = 1;
+    for (const h of hs) if (tt >= h[0] && tt <= h[1]) for (let j = 0; j < N; j++) { const x = j * DX - .9; if (x > h[2] && x < h[3]) nr[j] = 0; }
+    if (!nr.some(Boolean)) return false;
+    reach = nr;
+  }
+  return true;
+}
+function spawn() {
+  for (let i = 0; i < 6; i++) { const o = makeCand(); if (passable(objs.concat(o))) { objs.push(o); return true; } }
+  return false;
 }
 
 function crash(why) {
+  voStop();
   over = true; overT = 0; shown = false; on = false;
   S.engine.pause(); S.rain.pause(); S.wiper.pause(); stations.forEach(s => s.a.pause());
   play(S.crash);
@@ -73,7 +124,7 @@ function crash(why) {
 
 /* ---------- UPDATE ---------- */
 function update(dt) {
-  if (!briefing) t += dt;
+  t += dt;
   const dir = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0);
   px += dir * 1.5 * dt;
   steer += (dir * .6 - steer) * Math.min(1, dt * 8);
@@ -81,10 +132,10 @@ function update(dt) {
   const tg = Math.max(14, base + (keys.KeyW ? 14 : 0) - (keys.KeyS ? 16 : 0));
   v += (tg - v) * Math.min(1, dt * 1.5);
   dist += v * dt;
-  if (!briefing) fuel -= v * dt * .0008;
+  fuel -= v * dt * .0008;
   if (fuel <= 0) { fuel = 0; return crash('Out of fuel'); }
   dayL = Math.max(0, Math.min(1, .5 + .8 * Math.cos(t / 60 * Math.PI * 2)));
-  if (!briefing && dist >= fuelNext) { objs.push({ k: 'fuel', x: Math.random() < .5 ? -.5 : .5, z: 240, vs: 0, hw: .18 }); fuelNext = dist + 450 + Math.random() * 200; }
+  if (dist >= fuelNext) { objs.push({ k: 'fuel', x: Math.random() < .5 ? -.5 : .5, z: 240, vs: 0, hw: .18 }); fuelNext = dist + 450 + Math.random() * 200; }
   S.engine.playbackRate = .7 + v / 55;
 
   rainOn = Math.sin(t * .04) > .4;
@@ -93,16 +144,19 @@ function update(dt) {
   if (rainOn) dirt = Math.min(1, dirt + dt * .2);
   if (wiperOn) { wipeA += dt * 2.4; dirt = Math.max(0, dirt - dt * .5); } else wipeA = 0;
 
-  if (!briefing) spawnT -= dt;
-  if (spawnT <= 0) { spawn(); spawnT = Math.max(.45, 1.5 - dist / 4000) * (.6 + Math.random() * .8); }
+  spawnT -= dt;
+  if (spawnT <= 0) spawnT = spawn() ? Math.max(.45, 1.5 - dist / 4000) * (.6 + Math.random() * .8) : .25;
+  if (!clips.rules.heard && objs.some(o => (o.k === 'car' || o.k === 'pot' || o.k === 'log' || o.k === 'rock') && o.z < 150)) say('rules');
+  if (!clips.fuel.heard && (fuel < .6 || objs.some(o => o.k === 'fuel' && o.z < 170))) say('fuel');
+  if (dayL < .6) say('night');
+  if (dist > 600) { say('extras'); say('bye'); }
   treeT -= v * dt;
   if (treeT <= 0) { objs.push(tree(280)); treeT = 8 + Math.random() * 10; }
 
   for (const o of objs) o.z -= (v - o.vs) * dt;
   objs = objs.filter(o => o.z > -8 && o.z < 420);
 
-  if (briefing) px = Math.max(-.9, Math.min(.9, px));
-  else if (Math.abs(px) > .95) return crash();
+  if (Math.abs(px) > .95) return crash();
   for (const o of objs) {
     if (o.k === 'tree' || o.z > 2.2 || o.z < -1.5 || Math.abs(o.x - px) >= o.hw + .2) continue;
     if (o.k === 'fuel') { fuel = Math.min(1, fuel + .5); o.z = -99; play(S.refuel); } else return crash();
@@ -182,13 +236,16 @@ function cabin() {
   g.beginPath(); g.moveTo(0, 0); g.lineTo(90, 0); g.lineTo(0, H * .7); g.fill();
   g.beginPath(); g.moveTo(W, 0); g.lineTo(W - 90, 0); g.lineTo(W, H * .7); g.fill();
   g.fillRect(0, 0, W, 20);
-  g.fillStyle = '#0b0c10'; g.fillRect(W / 2 - 70, 20, 140, 26);
+  g.fillStyle = '#0b0c10'; g.fillRect(W / 2 - 70, 20, 140, 26); // espejo retrovisor
+  // tablero
   const gr = g.createLinearGradient(0, H - 190, 0, H); gr.addColorStop(0, '#2a2d35'); gr.addColorStop(1, '#0c0d10');
   g.fillStyle = gr; g.beginPath(); g.moveTo(0, H); g.lineTo(0, H - 85); g.quadraticCurveTo(W / 2, H - 185, W, H - 85); g.lineTo(W, H); g.fill();
   g.strokeStyle = '#3d424d'; g.lineWidth = 2; g.beginPath(); g.moveTo(0, H - 85); g.quadraticCurveTo(W / 2, H - 185, W, H - 85); g.stroke();
+  // limpiaparabrisas
   const w = (1 - Math.cos(wipeA)) / 2, ang = Math.PI * .97 - w * Math.PI * .94, px0 = W / 2 + 90, py0 = H - 78;
   g.strokeStyle = '#050505'; g.lineWidth = 6; g.beginPath(); g.moveTo(px0, py0);
   g.lineTo(px0 + 300 * Math.cos(ang), py0 - 300 * Math.sin(ang)); g.stroke();
+  // medidores
   gauge(W / 2 - 170, H - 66, 50, v * 3.6 / 240, 8);
   gauge(W / 2 + 170, H - 66, 40, fuel, 4);
   g.textAlign = 'center'; g.fillStyle = '#7fe3ff'; g.font = 'bold 20px "Courier New",monospace';
@@ -197,9 +254,11 @@ function cabin() {
   g.fillStyle = '#cfe9f5'; g.fillText('E', W / 2 + 170 - 26, H - 46); g.fillText('F', W / 2 + 170 + 26, H - 46); g.fillText('FUEL', W / 2 + 170, H - 36);
   const low = fuel < .25, blink = low && Math.floor(t * 3) % 2 === 0;
   chip('LIGHTS', W / 2 - 62, H - 100, lightsOn, '#5dff7a'); chip('WIPER', W / 2, H - 100, wiperOn, '#5dd0ff'); chip('FUEL', W / 2 + 62, H - 100, blink, '#ff4b3a');
+  // volante
   g.save(); g.translate(W / 2, H + 30); g.rotate(steer);
   g.strokeStyle = '#08090b'; g.lineWidth = 16; g.beginPath(); g.arc(0, 0, 92, 0, 7); g.stroke();
   g.lineWidth = 10; g.beginPath(); g.moveTo(-92, 0); g.lineTo(92, 0); g.moveTo(0, 0); g.lineTo(0, -92); g.stroke(); g.restore();
+  // radio
   g.fillStyle = '#05080a'; g.fillRect(W - 230, H - 52, 190, 34);
   g.textAlign = 'left'; g.fillStyle = radioOn ? '#ffb627' : '#4a3a14'; g.font = 'bold 18px "Courier New",monospace';
   g.fillText(radioOn ? '♪ ' + stations[st].n : 'RADIO OFF', W - 218, H - 29);
@@ -251,28 +310,25 @@ function draw() {
   objs.sort((a, b) => b.z - a.z).forEach(drawObj);
   weather(); night(); cabin();
   g.textAlign = 'center'; g.fillStyle = '#fff'; g.shadowColor = '#000'; g.shadowOffsetX = 2; g.shadowOffsetY = 2;
-  g.font = 'bold 30px "Courier New",monospace'; g.fillText((briefing ? 0 : Math.floor(dist)) + ' m', W / 2, 58);
+  g.font = 'bold 30px "Courier New",monospace'; g.fillText(Math.floor(dist) + ' m', W / 2, 58);
   if (on && t < 9) {
     g.font = '14px "Courier New",monospace';
     g.fillText('W/S accelerate-brake · A/D steer · L lights · Q wipers · R radio · E/Z station · Space horn', W / 2, 88);
   }
-  if (briefing) { g.font = 'bold 22px "Courier New",monospace'; g.fillText('Listen to the intro…  (Enter to skip)', W / 2, 140); }
   g.shadowOffsetX = 0; g.shadowOffsetY = 0;
   if (over) {
     g.fillStyle = `rgba(200,30,30,${Math.max(0, .6 - overT)})`; g.fillRect(0, 0, W, H);
     overT += 1 / 60;
-    if (overT > .9 && !shown) { shown = true; playBtn.textContent = 'Play'; menu.classList.remove('hide'); }
+    if (overT > .9 && !shown) { shown = true; playBtn.hidden = false; startBtn.hidden = true; menu.classList.remove('hide'); }
   }
 }
 
 /* ---------- CONTROLES ---------- */
 addEventListener('keydown', e => {
   if (!on) return;
-  if (briefing && (e.code === 'Enter' || e.code === 'NumpadEnter')) { startRun(); return; }
   if (['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(e.code)) e.preventDefault();
   keys[e.code] = true;
   if (e.repeat) return;
-  if (briefing && e.code !== 'KeyL') return;
   if (e.code === 'KeyQ') { wiperOn = !wiperOn; wiperOn ? S.wiper.play().catch(() => {}) : S.wiper.pause(); }
   if (e.code === 'KeyR') { radioOn = !radioOn; tune(); }
   if (e.code === 'KeyL') lightsOn = !lightsOn;
@@ -285,44 +341,37 @@ addEventListener('keydown', e => {
 addEventListener('keyup', e => { keys[e.code] = false; });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
 
-/* ---------- GESTIÓN DE BIENVENIDA Y AUDIO ---------- */
+/* Bienvenida: con la primera interacción se quita el splash, aparece el menú y suena welcome */
 function handleFirstInteraction(e) {
   if (e && e.target.tagName === 'BUTTON') return;
-
-  // 1. Ocultamos el splash y mostramos el menú principal primero
-  splashEl.classList.add('hide');
+  if (splashEl) splashEl.classList.add('hide');
   menu.classList.remove('hide');
-
-  // 2. Reproducimos el audio de bienvenida inmediatamente después de quitar el wrapper
-  S.welcome.play().then(() => {
-    introDone = true;
-  }).catch((err) => {
-    console.log("Audio de bienvenida bloqueado o falló:", err);
-  });
-
-  // 3. Limpiamos los eventos globales
-  removeEventListener('pointerdown', handleFirstInteraction);
-  removeEventListener('keydown', handleFirstInteraction);
+  S.welcome.play().then(() => { introDone = true; }).catch(err => console.log('Welcome audio blocked or failed:', err));
+  removeEventListener('pointerdown', handleFirstInteraction); removeEventListener('keydown', handleFirstInteraction);
 }
+addEventListener('pointerdown', handleFirstInteraction); addEventListener('keydown', handleFirstInteraction);
 
-addEventListener('pointerdown', handleFirstInteraction);
-addEventListener('keydown', handleFirstInteraction);
-
+/* Play: aparece el botón Start engine y empieza la introducción (el coche espera parado, sin autos ni obstáculos).
+   Start engine corta la introducción si sigue sonando, arranca el motor y empieza la partida desde 0 m. */
+playBtn.onclick = () => {
+  S.welcome.pause(); introDone = true;
+  reset(); briefing = true; scoreEl.textContent = '';
+  playBtn.hidden = true; startBtn.hidden = false; startBtn.focus();
+  S.intro.currentTime = 0;
+  S.intro.play().catch(() => {});
+};
 function startRun() {
   if (!briefing) return;
+  // lo que el jugador ya escuchó del intro completo no se repite
+  if (S.intro.ended) VO.forEach(c => { c.heard = true; });
+  else { let acc = 0; for (const c of VO) { acc += c.dur; if (c.dur && S.intro.currentTime >= acc - .3) c.heard = true; } }
   briefing = false; S.intro.pause();
-  dist = 0; t = 0; fuel = 1; fuelNext = 400; spawnT = 1.5;
+  if (!clips.controls.heard) spawnT = 6;
+  on = true; shown = true; menu.classList.add('hide'); startBtn.blur();
   S.engine.play().catch(() => {});
+  say('controls');
 }
-S.intro.onended = startRun;
-playBtn.onclick = () => {
-  introDone = true;
-  reset(); on = true; shown = true; scoreEl.textContent = '';
-  menu.classList.add('hide'); playBtn.blur();
-  briefing = true;
-  S.intro.currentTime = 0;
-  S.intro.play().catch(startRun);
-};
+startBtn.onclick = startRun;
 
 function loop(ts) {
   const dt = Math.min(.05, (ts - last) / 1000 || 0); last = ts;
