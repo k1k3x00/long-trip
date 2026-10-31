@@ -2,8 +2,7 @@
 const cv = document.getElementById('c'), g = cv.getContext('2d');
 const W = 960, H = 540, HY = 190, D = 6, RW = W * .55, CX = W / 2;
 const menu = document.getElementById('menu'), volEl = document.getElementById('vol'),
-      scoreEl = document.getElementById('score'), playBtn = document.getElementById('play'), splashEl = document.getElementById('splash'),
-      startBtn = document.getElementById('start') || (() => { const b = document.createElement('button'); b.id = 'start'; b.textContent = 'Start engine'; b.hidden = true; playBtn.after(b); return b; })();
+      scoreEl = document.getElementById('score'), playBtn = document.getElementById('play'), splashEl = document.getElementById('splash');
 const nc = document.createElement('canvas'); nc.width = W; nc.height = H; const ng = nc.getContext('2d');
 const mix = (a, b, k) => `rgb(${a.map((x, i) => Math.round(x + (b[i] - x) * k))})`;
 
@@ -12,25 +11,27 @@ const mk = (f, loop = false) => { const a = new Audio('audio/' + f); a.loop = lo
 const S = {
   engine: mk('sfx/engine.mp3', true), horn: mk('sfx/horn.mp3'), crash: mk('sfx/crash.mp3'),
   wiper: mk('sfx/wiper.mp3', true), stat: mk('sfx/radio-static.mp3'), rain: mk('sfx/rain.mp3', true),
-  welcome: mk('voice/welcome.mp4'), intro: mk('voice/intro.mp3'),
+  welcome: mk('voice/welcome.mp4'),
   refuel: mk('sfx/refuel.mp3')
 };
-const BASE = { engine: .5, horn: .9, crash: 1, wiper: .6, stat: .5, rain: .5, welcome: 1, intro: 1, refuel: .8 };
+const BASE = { engine: .5, horn: .9, crash: 1, wiper: .6, stat: .5, rain: .5, welcome: 1, refuel: .8 };
 const stations = [
   { n: 'FM 88.1', a: mk('music/radio1.mp3', true) },
   { n: 'FM 95.5', a: mk('music/radio2.mp3', true) },
   { n: 'FM 101.3', a: mk('music/radio3.mp3', true) }
 ];
-/* Voces situacionales. intro.mp3 = estos clips pegados en este orden. Cada clip suena cuando ocurre su situación,
-   salvo que el jugador ya lo haya escuchado en el intro. Los clips nunca se pisan: se encolan. */
+/* Voces situacionales (intro.mp3 ya no se usa). Los clips nunca se pisan: se encolan.
+   APERTURA (controls, rules, bye): suenan al empezar la partida; hasta que terminan no aparece ningún auto ni obstáculo.
+   Enter salta la apertura. El resto suena cuando ocurre su situación. */
 const VO = [
-  { id: 'controls', f: 'voice/intro1.mp4' },    // al arrancar la partida
-  { id: 'rules',    f: 'voice/intro2.mp4' },    // primer auto u obstáculo a la vista
-  { id: 'fuel',     f: 'voice/intro2-5.mp4' },  // primer bidón a la vista, o tanque por debajo del 60%
+  { id: 'controls', f: 'voice/intro1.mp4' },    // apertura
+  { id: 'rules',    f: 'voice/intro2.mp4' },    // apertura
+  { id: 'bye',      f: 'voice/intro5.mp4' },    // apertura
+  { id: 'fuel',     f: 'voice/intro2-5.mp4' },  // combustible bajo (menos del 25%)
   { id: 'night',    f: 'voice/intro3.mp4' },    // empieza a oscurecer (incluye la lluvia si grabaste esa frase aquí)
-  { id: 'extras',   f: 'voice/intro4.mp4' },    // radio y bocina, a los 600 m
-  { id: 'bye',      f: 'voice/intro5.mp4' }     // despedida, justo después de extras
+  { id: 'extras',   f: 'voice/intro4.mp4' }     // radio y bocina, a los 600 m
 ];
+const OPENING = ['controls', 'rules', 'bye'];
 const clips = {};
 VO.forEach(c => { c.a = mk(c.f); c.dur = 0; c.a.addEventListener('loadedmetadata', () => { c.dur = c.a.duration || 0; }); clips[c.id] = c; });
 let voQ = [], voNow = null;
@@ -38,7 +39,8 @@ function say(id) { const c = clips[id]; if (!c || c.heard || c.queued) return; c
 function pump() {
   if (voNow || !voQ.length || !on) return;
   const c = voQ.shift(); voNow = c; c.heard = true;
-  const done = () => { c.a.onended = c.a.onerror = null; voNow = null; pump(); };
+  let fin = false;
+  const done = () => { if (fin) return; fin = true; c.a.onended = c.a.onerror = null; voNow = null; if (briefing && OPENING.every(id => clips[id].heard && !voQ.includes(clips[id]))) startRun(); pump(); };
   c.a.onended = c.a.onerror = done; c.a.currentTime = 0; c.a.play().catch(done);
 }
 function voStop() { voQ = []; if (voNow) { voNow.a.onended = voNow.a.onerror = null; voNow.a.pause(); voNow = null; } }
@@ -70,7 +72,7 @@ const rc = () => COLORS[Math.random() * COLORS.length | 0];
 
 function reset() {
   voStop(); VO.forEach(c => { c.heard = false; c.queued = false; });
-  px = .5; v = 0; dist = 0; objs = []; spawnT = 1.5; treeT = 0; t = 0; dirt = 0; wipeA = 0; steer = 0;
+  px = .5; v = 24; dist = 0; objs = []; spawnT = 1.5; treeT = 0; t = 0; dirt = 0; wipeA = 0; steer = 0;
   fuel = 1; fuelNext = 400; lightsOn = false; dayL = 1;
   wiperOn = false; rainOn = false; rainLv = 0; rainWas = false; over = false; overT = 0; radioOn = false;
   stations.forEach(s => s.a.pause()); S.wiper.pause(); S.rain.pause();
@@ -124,7 +126,7 @@ function crash(why) {
 
 /* ---------- UPDATE ---------- */
 function update(dt) {
-  t += dt;
+  if (!briefing) t += dt;
   const dir = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0);
   px += dir * 1.5 * dt;
   steer += (dir * .6 - steer) * Math.min(1, dt * 8);
@@ -132,10 +134,10 @@ function update(dt) {
   const tg = Math.max(14, base + (keys.KeyW ? 14 : 0) - (keys.KeyS ? 16 : 0));
   v += (tg - v) * Math.min(1, dt * 1.5);
   dist += v * dt;
-  fuel -= v * dt * .0008;
+  if (!briefing) fuel -= v * dt * .0008;
   if (fuel <= 0) { fuel = 0; return crash('Out of fuel'); }
   dayL = Math.max(0, Math.min(1, .5 + .8 * Math.cos(t / 60 * Math.PI * 2)));
-  if (dist >= fuelNext) { objs.push({ k: 'fuel', x: Math.random() < .5 ? -.5 : .5, z: 240, vs: 0, hw: .18 }); fuelNext = dist + 450 + Math.random() * 200; }
+  if (!briefing && dist >= fuelNext) { objs.push({ k: 'fuel', x: Math.random() < .5 ? -.5 : .5, z: 240, vs: 0, hw: .18 }); fuelNext = dist + 450 + Math.random() * 200; }
   S.engine.playbackRate = .7 + v / 55;
 
   rainOn = Math.sin(t * .04) > .4;
@@ -144,19 +146,21 @@ function update(dt) {
   if (rainOn) dirt = Math.min(1, dirt + dt * .2);
   if (wiperOn) { wipeA += dt * 2.4; dirt = Math.max(0, dirt - dt * .5); } else wipeA = 0;
 
-  spawnT -= dt;
+  if (!briefing) spawnT -= dt;
   if (spawnT <= 0) spawnT = spawn() ? Math.max(.45, 1.5 - dist / 4000) * (.6 + Math.random() * .8) : .25;
-  if (!clips.rules.heard && objs.some(o => (o.k === 'car' || o.k === 'pot' || o.k === 'log' || o.k === 'rock') && o.z < 150)) say('rules');
-  if (!clips.fuel.heard && (fuel < .6 || objs.some(o => o.k === 'fuel' && o.z < 170))) say('fuel');
-  if (dayL < .6) say('night');
-  if (dist > 600) { say('extras'); say('bye'); }
+  if (!briefing) {
+    if (fuel < .25) say('fuel');
+    if (dayL < .6) say('night');
+    if (dist > 600) say('extras');
+  }
   treeT -= v * dt;
   if (treeT <= 0) { objs.push(tree(280)); treeT = 8 + Math.random() * 10; }
 
   for (const o of objs) o.z -= (v - o.vs) * dt;
   objs = objs.filter(o => o.z > -8 && o.z < 420);
 
-  if (Math.abs(px) > .95) return crash();
+  if (briefing) px = Math.max(-.9, Math.min(.9, px));
+  else if (Math.abs(px) > .95) return crash();
   for (const o of objs) {
     if (o.k === 'tree' || o.z > 2.2 || o.z < -1.5 || Math.abs(o.x - px) >= o.hw + .2) continue;
     if (o.k === 'fuel') { fuel = Math.min(1, fuel + .5); o.z = -99; play(S.refuel); } else return crash();
@@ -310,25 +314,28 @@ function draw() {
   objs.sort((a, b) => b.z - a.z).forEach(drawObj);
   weather(); night(); cabin();
   g.textAlign = 'center'; g.fillStyle = '#fff'; g.shadowColor = '#000'; g.shadowOffsetX = 2; g.shadowOffsetY = 2;
-  g.font = 'bold 30px "Courier New",monospace'; g.fillText(Math.floor(dist) + ' m', W / 2, 58);
+  g.font = 'bold 30px "Courier New",monospace'; g.fillText((briefing ? 0 : Math.floor(dist)) + ' m', W / 2, 58);
   if (on && t < 9) {
     g.font = '14px "Courier New",monospace';
     g.fillText('W/S accelerate-brake · A/D steer · L lights · Q wipers · R radio · E/Z station · Space horn', W / 2, 88);
   }
+  if (briefing) { g.font = 'bold 22px "Courier New",monospace'; g.fillText('Listen to the intro…  (Enter to skip)', W / 2, 140); }
   g.shadowOffsetX = 0; g.shadowOffsetY = 0;
   if (over) {
     g.fillStyle = `rgba(200,30,30,${Math.max(0, .6 - overT)})`; g.fillRect(0, 0, W, H);
     overT += 1 / 60;
-    if (overT > .9 && !shown) { shown = true; playBtn.hidden = false; startBtn.hidden = true; menu.classList.remove('hide'); }
+    if (overT > .9 && !shown) { shown = true; playBtn.textContent = 'Play'; menu.classList.remove('hide'); }
   }
 }
 
 /* ---------- CONTROLES ---------- */
 addEventListener('keydown', e => {
   if (!on) return;
+  if (briefing && (e.code === 'Enter' || e.code === 'NumpadEnter')) { skipOpening(); return; }
   if (['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(e.code)) e.preventDefault();
   keys[e.code] = true;
   if (e.repeat) return;
+  if (briefing && e.code !== 'KeyL') return;
   if (e.code === 'KeyQ') { wiperOn = !wiperOn; wiperOn ? S.wiper.play().catch(() => {}) : S.wiper.pause(); }
   if (e.code === 'KeyR') { radioOn = !radioOn; tune(); }
   if (e.code === 'KeyL') lightsOn = !lightsOn;
@@ -351,27 +358,25 @@ function handleFirstInteraction(e) {
 }
 addEventListener('pointerdown', handleFirstInteraction); addEventListener('keydown', handleFirstInteraction);
 
-/* Play: aparece el botón Start engine y empieza la introducción (el coche espera parado, sin autos ni obstáculos).
-   Start engine corta la introducción si sigue sonando, arranca el motor y empieza la partida desde 0 m. */
-playBtn.onclick = () => {
-  S.welcome.pause(); introDone = true;
-  reset(); briefing = true; scoreEl.textContent = '';
-  playBtn.hidden = true; startBtn.hidden = false; startBtn.focus();
-  S.intro.currentTime = 0;
-  S.intro.play().catch(() => {});
-};
+/* Play: empieza la partida con la apertura (intro1, intro2, intro5). Mientras suena no hay autos ni obstáculos
+   y no suena nada más. Al terminar (o con Enter) empieza la partida de verdad desde 0 m. */
 function startRun() {
   if (!briefing) return;
-  // lo que el jugador ya escuchó del intro completo no se repite
-  if (S.intro.ended) VO.forEach(c => { c.heard = true; });
-  else { let acc = 0; for (const c of VO) { acc += c.dur; if (c.dur && S.intro.currentTime >= acc - .3) c.heard = true; } }
-  briefing = false; S.intro.pause();
-  if (!clips.controls.heard) spawnT = 6;
-  on = true; shown = true; menu.classList.add('hide'); startBtn.blur();
+  briefing = false;
+  dist = 0; t = 0; fuel = 1; fuelNext = 400; spawnT = 1.5;
   S.engine.play().catch(() => {});
-  say('controls');
 }
-startBtn.onclick = startRun;
+function skipOpening() {
+  voStop(); OPENING.forEach(id => { clips[id].heard = clips[id].queued = true; });
+  startRun();
+}
+playBtn.onclick = () => {
+  S.welcome.pause(); introDone = true;
+  reset(); on = true; shown = true; scoreEl.textContent = '';
+  menu.classList.add('hide'); playBtn.blur();
+  briefing = true;
+  OPENING.forEach(say);
+};
 
 function loop(ts) {
   const dt = Math.min(.05, (ts - last) / 1000 || 0); last = ts;
